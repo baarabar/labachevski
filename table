@@ -1,0 +1,176 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import pandas as pd
+
+class ExcelLikeTable:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Таблица Excel-подобная")
+        self.root.geometry("700x500")
+        self.root.configure(bg="#F0F0F0")
+        
+        self.columns = ["A", "B", "C"]  # Изначально 3 столбца
+
+        # Для отслеживания текущей редактируемой ячейки
+        self.current_row = 0
+        self.current_col = 0
+        self.active_cell = None
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        # Frame для таблицы
+        self.table_frame = tk.Frame(self.root, bg="#F5F5F5", padx=10, pady=10)
+        self.table_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
+        # Изначально создаем таблицу
+        self.create_table(self.columns)
+
+        # Кнопки для сохранения и загрузки данных
+        self.buttons_frame = tk.Frame(self.root, bg="#E0E0E0", padx=10, pady=10)
+        self.buttons_frame.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
+
+        self.load_csv_btn = ttk.Button(self.buttons_frame, text="Загрузить CSV", command=self.load_csv)
+        self.load_csv_btn.grid(row=0, column=0, padx=5)
+
+        self.save_csv_btn = ttk.Button(self.buttons_frame, text="Сохранить CSV", command=self.save_to_csv)
+        self.save_csv_btn.grid(row=0, column=1, padx=5)
+
+        # Растягиваем элементы
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+
+    def create_table(self, columns):
+        """Создание таблицы на основе Treeview."""
+        self.table = ttk.Treeview(self.table_frame, columns=columns, show="headings", height=10)
+        for col in columns:
+            self.table.heading(col, text=col)
+            self.table.column(col, width=100)
+
+        self.table.grid(row=0, column=0, sticky="nsew")
+
+        # Привязка для обработки кликов мышью и клавиш стрелок
+        self.table.bind("<Button-1>", self.on_click)  # Однократный клик для выделения ячейки
+        self.table.bind("<KeyPress>", self.on_key_press)  # Клавиши для навигации по ячейкам
+        self.table.bind("<Return>", self.on_enter_press)  # Нажатие Enter для редактирования ячейки
+
+        # Скроллбар для таблицы
+        self.scrollbar = ttk.Scrollbar(self.table_frame, orient="vertical", command=self.table.yview)
+        self.table.configure(yscroll=self.scrollbar.set)
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
+
+        # Добавление нескольких строк по умолчанию
+        for i in range(10):
+            self.table.insert('', 'end', values=[""] * len(columns))
+
+        # Фокус на таблицу для работы с клавишами
+        self.table.focus_set()
+
+    def on_click(self, event):
+        """Обработка клика по ячейке для выделения."""
+        region = self.table.identify_region(event.x, event.y)
+        if region == "cell":
+            column = self.table.identify_column(event.x)
+            row = self.table.identify_row(event.y)
+            col_num = int(column.replace("#", "")) - 1
+            row_id = self.table.index(row)
+            self.set_active_cell(row_id, col_num)
+
+    def on_key_press(self, event):
+        """Обработка клавиш для перемещения."""
+        key = event.keysym
+        if key in ["Up", "Down", "Left", "Right"]:
+            self.navigate_cells(key)
+
+    def on_enter_press(self, event):
+        """Начать редактирование ячейки при нажатии Enter."""
+        if self.active_cell is not None:
+            row_id, col_num = self.active_cell
+            self.edit_cell(row_id, col_num)
+
+    def set_active_cell(self, row_id, col_num):
+        """Установка активной ячейки."""
+        self.current_row = row_id
+        self.current_col = col_num
+        self.active_cell = (row_id, col_num)
+
+    def edit_cell(self, row_id, col_num):
+        """Редактирование выбранной ячейки."""
+        x, y, width, height = self.table.bbox(self.table.get_children()[row_id], col_num)
+
+        # Получаем текущее значение ячейки
+        cell_value = self.table.item(self.table.get_children()[row_id], "values")[col_num]
+
+        # Создаем Entry для редактирования
+        self.current_entry = tk.Entry(self.table_frame, font=("Helvetica", 12))
+        self.current_entry.place(x=x, y=y, width=width, height=height)
+        self.current_entry.insert(0, cell_value)
+        self.current_entry.focus_set()
+
+        # Подтверждение редактирования по нажатию Enter или перемещению с помощью Tab
+        self.current_entry.bind("<Return>", lambda event: self.save_edit(row_id, col_num))
+        self.current_entry.bind("<Tab>", lambda event: self.save_edit(row_id, col_num))
+
+    def save_edit(self, row_id, col_num):
+        """Сохранение изменений в текущей ячейке."""
+        new_value = self.current_entry.get()
+        row_values = list(self.table.item(self.table.get_children()[row_id], "values"))
+        row_values[col_num] = new_value
+        self.table.item(self.table.get_children()[row_id], values=row_values)
+        self.current_entry.destroy()
+        self.current_entry = None
+
+    def navigate_cells(self, direction):
+        """Навигация между ячейками с помощью стрелок."""
+        max_row = len(self.table.get_children()) - 1
+        max_col = len(self.table["columns"]) - 1
+
+        if direction == "Up" and self.current_row > 0:
+            self.current_row -= 1
+        elif direction == "Down" and self.current_row < max_row:
+            self.current_row += 1
+        elif direction == "Left" and self.current_col > 0:
+            self.current_col -= 1
+        elif direction == "Right" and self.current_col < max_col:
+            self.current_col += 1
+
+        # Установка новой активной ячейки
+        self.set_active_cell(self.current_row, self.current_col)
+
+    def load_csv(self):
+        """Загрузка данных из CSV в таблицу."""
+        file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+        if file_path:
+            try:
+                df = pd.read_csv(file_path)
+                self.reset_table(df.columns.tolist())  # Пересоздаем таблицу с новыми колонками
+                for _, row in df.iterrows():
+                    self.table.insert("", "end", values=row.tolist())
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить файл: {e}")
+
+    def reset_table(self, columns):
+        """Очистка старой таблицы и создание новой с заданными колонками."""
+        for widget in self.table_frame.winfo_children():
+            widget.destroy()
+        self.create_table(columns)
+
+    def save_to_csv(self):
+        """Сохранение данных из таблицы в CSV файл."""
+        data = []
+        for row_id in self.table.get_children():
+            row_data = self.table.item(row_id)["values"]
+            data.append(row_data)
+
+        # Преобразование данных в DataFrame и сохранение в CSV
+        df = pd.DataFrame(data, columns=self.table["columns"])
+        save_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
+        if save_path:
+            df.to_csv(save_path, index=False)
+            messagebox.showinfo("Сохранение", f"Данные сохранены в {save_path}")
+
+# Запуск приложения
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ExcelLikeTable(root)
+    root.mainloop()
